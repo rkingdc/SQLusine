@@ -1,3 +1,5 @@
+
+``` R
 sub_qry <- SELECT(
   from = 'tbl_whatever',
   what = c('k_tbl_whatever', 'name', 'userID', J('department', 'dept_code')),
@@ -16,3 +18,4 @@ qry <- SELECT_DISTINCT(
 
 cat(render_query(sub_qry, conn = DBI::ANSI()))
 cat(render_query(qry, conn = DBI::ANSI()))
+```
