@@ -1,7 +1,7 @@
 Package: SQLusine
 Type: Package
 Title: Factory for Building SQL Statements
-Version: 0.1.0
+Version: 0.1.0.9000
 Author: Roz King
 Maintainer: Roz King <roz@rkingdc.com>
 Description: Provides functions to generate various SQL statements programatically. 
