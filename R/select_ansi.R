@@ -1,84 +1,100 @@
 
-select_query_renderer.AnsiConnection <- function(conn, query){
-  # clauses <- c(what = 'SELECT',
-  #              from = 'FROM',
-  #              join = 'JOIN',
-  #              where = 'WHERE',
-  #              group_by = 'GROUP BY',
-  #              having = 'HAVING',
-  #              limit = 'LIMIT')
+.ansi_join <- function(from_lhs, from_rhs, join, join_from_clause, conn){
 
-  ## from
-  if (is.character(query$from)){
-    from_lhs <- Alias(what = query$from, alias = query$from)
-    clause_from <- paste('FROM', DBI::dbQuoteIdentifier(conn, from_lhs$alias))
+  join_stmt <- switch(join$type,
+                      'inner' = 'INNER JOIN',
+                      'left' = 'LEFT JOIN',
+                      'right' = 'RIGHT JOIN')
 
-  } else if (inherits(from, 'Alias')){
-    from_lhs <- query$from
-    clause_from <- paste('FROM', DBI::dbQuoteIdentifier(conn, from_lhs$what),
-                         'AS', DBI::dbQuoteIdentifier(conn, from_lhs$alias))
+  on_stmt <- paste0(DBI::dbQuoteIdentifier(conn, from_lhs$alias), '.',
+                    DBI::dbQuoteIdentifier(conn, extract_lhs_on(join$on)),
+                    ' = ',
+                    DBI::dbQuoteIdentifier(conn, from_rhs$alias), '.',
+                    DBI::dbQuoteIdentifier(conn, extract_rhs_on(join$on)))
+  clause_join <- paste(join_stmt, join_from_clause, 'ON', on_stmt)
+  return (clause_join)
+}
 
-  } else if (inherits(from, 'SelectQuery')){
-    from_lhs <- Alias(what = query$from, alias = random_name())
-    clause_from <- paste('FROM (', select_query_renderer(from_lhs$what),
-                         ') AS', DBI::dbQuoteIdentifier(conn, from_lhs$alias))
+
+.ansi_column_source <- function(what, from_rhs, from_lhs){
+
+  if (length(what) == 1 && what == '*') {
+    return(NULL)
   }
 
-  if (!is.null(query$join)){
-    if (is.character(query$join$from)){
-      from_rhs <- Alias(what = query$join$from, alias = query$join$from)
-      join_from_clause <- DBI::dbQuoteIdentifier(conn, from_rhs$alias)
-    }
-    if (inherits(query$join$from, 'Alias')){
-      from_rhs <- Alias(what = query$join$from)
-      join_from_clause <- paste(DBI::dbQuoteIdentifier(conn, from_rhs$what),
-                                'AS', DBI::dbQuoteIdentifier(conn, from_rhs$alias))
-    }
-    if (inherits(query$join$from, 'SelectQuery')){
-      from_rhs <- Alias(what = query$join$from, alias = random_name())
-      join_from_clause <- paste('(', render_query(from_rhs$what, conn=conn),
-                                ') AS', DBI::dbQuoteIdentifier(conn, from_rhs$alias))
-    }
-    join_stmt <- switch(query$join$type,
-                        'inner' = 'INNER JOIN',
-                        'left' = 'LEFT JOIN',
-                        'right' = 'RIGHT JOIN')
-    on_stmt <- paste0(DBI::dbQuoteIdentifier(conn, from_lhs$alias), '.',
-                      DBI::dbQuoteIdentifier(conn, extract_lhs_on(query$join$on)),
-                      ' = ',
-                      DBI::dbQuoteIdentifier(conn, from_rhs$alias), '.',
-                      DBI::dbQuoteIdentifier(conn, extract_rhs_on(query$join$on)))
-    clause_join <- paste(join_stmt, join_from_clause, 'ON', on_stmt)
-
-  } else {
-    clause_join <- NULL
-  }
-
-  ## select
-  select_keyword <- switch(query$type,
-                           select = 'SELECT',
-                           distinct = 'SELECT DISTINCT')
-
-  if (length(query$what) == 1 && query$what == '*') {
-    clause_select <- paste(select_keyword, '*')
-  } else {
-    from_column_labels <- vapply(query$what, function(x){
+    vapply(what, function(x){
       if (!is.null(attr(x, 'source')) && attr(x, 'source') == 'join'){
         from_rhs$alias
       } else {
         from_lhs$alias
       }
     }, FUN.VALUE = character(1))
+}
 
+.ansi_select <- function(type, column_sources, column_identifiers, conn){
+  select_keyword <- switch(query$type,
+                           select = 'SELECT',
+                           distinct = 'SELECT DISTINCT')
+
+  if (length(column_identifiers) == 1 && column_identifiers == '*'){
+    column_labels <- '*'
+  } else {
     column_labels <- paste(
-      DBI::dbQuoteIdentifier(conn=conn, x = from_column_labels), '.',
-      DBI::dbQuoteIdentifier(conn=conn, x = extract_identifiers(query$what)),
+      DBI::dbQuoteIdentifier(conn=conn, x = column_sources), '.',
+      DBI::dbQuoteIdentifier(conn=conn, x = column_identifiers),
       sep=''
     )
-
-    clause_select <- sprintf('%s %s',select_keyword, paste(column_labels, collapse=', '))
-
   }
+
+  clause_select <- sprintf('%s %s',select_keyword, paste(column_labels, collapse=', '))
+  return (clause_select)
+}
+
+select_query_renderer.AnsiConnection <- function(conn, query){
+  # what = 'SELECT',
+  # from = 'FROM',
+  # join = 'JOIN',
+  # where = 'WHERE',
+  # group_by = 'GROUP BY',
+  # having = 'HAVING',
+  # limit = 'LIMIT')
+
+  ### FROM ###
+  from_list   <- .from(from = query$from, conn=conn)
+  from_lhs    <- from_list$from_alias
+  clause_from <- paste('FROM', from_list$clause_from)
+
+  ### JOIN ###
+  if(!is.null(query$join)){
+
+    # determining join source is same procces as FROM above
+    join_from_list   <- .from(from = query$join$from, conn=conn)
+    from_rhs         <- join_from_list$from_alias
+    join_from_clause <- join_from_list$clause_from
+
+    # then we add join-specific syntax
+    clause_join <- .ansi_join(
+      from_lhs = from_lhs,
+      from_rhs = from_rhs,
+      join = query$join,
+      join_from_clause = join_from_clause,
+      conn = conn)
+
+  } else {
+    clause_join <- NULL
+  }
+
+  ### SELECT ###
+  select_column_source <- .ansi_column_source(what = query$what,
+                                              from_lhs = from_lhs,
+                                              from_rhs = from_rhs)
+  select_column_identifier <- extract_identifiers(query$what)
+
+  clause_select <- .ansi_select(type = query$type,
+                                column_sources = select_column_source,
+                                column_identifiers = select_column_identifier,
+                                conn = conn)
+
 
   paste(clause_select,
         clause_from,

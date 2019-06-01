@@ -73,6 +73,30 @@ SELECT_DISTINCT <- function(from,
 }
 
 
+.from <- function(from, conn){
+  UseMethod('.from', from)
+}
+
+.from.character <- function(from, conn){
+  from_alias <- Alias(what = from, alias = from)
+  clause_from <- paste(DBI::dbQuoteIdentifier(conn, from_alias$alias))
+  return(list(from_alias = from_alias, clause_from = clause_from))
+}
+
+.from.Alias <- function(from, conn){
+  from_alias <- from
+  clause_from <- paste(DBI::dbQuoteIdentifier(conn, from_alias$what),
+                       'AS', DBI::dbQuoteIdentifier(conn, from_alias$alias))
+  return(list(from_alias = from_alias, clause_from = clause_from))
+}
+
+.from.SelectQuery <- function(from, conn){
+  from_alias <- Alias(what = from, alias = random_name())
+  clause_from <- paste('(', render_query(from_alias$what, conn=conn),
+                       ') AS', DBI::dbQuoteIdentifier(conn, from_alias$alias))
+  return(list(from_alias = from_alias, clause_from = clause_from))
+}
+
 
 .select <- function(type = 'select',
                     from,
